@@ -1,190 +1,218 @@
 package org.firstinspires.ftc.teamcode;
 
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
-import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
-@TeleOp(name="UDC_Teleop", group="Iterative Opmode")
-public class UDC_Teleop extends OpMode
+public class UDC_Teleop
 {
-    private JoystickCalc Jc = null;
-    private SkyStoneBot Bot = null;
+     SkyStoneBot Bot = null;
+     PIDAngleFollower angleFollower = null;
 
-    private double BaseDriveSpeedMultiplier = 1;
-    private double BaseTurnSpeedMultiplier = 0.4;
-    private double DriveSpeedMultiplier;
-    private double TurnSpeedMultiplier;
-    private boolean normalMode = true;
-    private double gripperPosition = 0.5;
+     double BaseDriveSpeedMultiplier = 1;
+     double BaseTurnSpeedMultiplier = 1;
+     private double DriveSpeedMultiplier = 1 ;
+     private double TurnSpeedMultiplier = 1;
+     private double DriveAngle;
+     private boolean DriveAngleReseted = false;
 
     private double JoystickThreshold = 0.2;
+    private double turnSpeed;
 
-    public Gripper gripper;
-    public ArmAttachment arm;
+    private int[] MaxMotorPositions = {0,0,0,0};
+    private int[] PreviousMotorPositions = {0,0,0,0};
+    private int[] TotalMotorClicks = {0,0,0,0};
+    boolean FirstRun = true;
 
+    OpMode opmode;
+    public boolean headlessMode = false;
 
-    @Override
-    public void init()
+    boolean rotatedRobot = false;
+
+    public UDC_Teleop(OpMode thatopmode, boolean rotatedRobot)
     {
-        gripperPosition = 0.5;
-        Jc = new JoystickCalc(this);
-        Bot = new SkyStoneBot(this);
-        Bot.Init();
-        gripper = new Gripper(this);
-        gripper.Init();
-        arm = new ArmAttachment(this);
-        arm.Init();
-        //set speeds:
-        DriveSpeedMultiplier = BaseDriveSpeedMultiplier;
-        TurnSpeedMultiplier = BaseTurnSpeedMultiplier;
+        opmode = thatopmode;
+        this.rotatedRobot = rotatedRobot;
     }
 
-    @Override
-    public void start()
+    public void Init()
+    {
+        Bot = new SkyStoneBot(opmode, rotatedRobot);
+        Bot.Init();
+        angleFollower = new PIDAngleFollower();
+    }
+
+    public void Start()
     {
         Bot.Start();
     }
 
-    @Override
-    public void loop()
+    public void Loop()
     {
         Bot.Loop();
-        //Update telemetry and get joystick input
-        Jc.calculate();
+    }
 
-        //calculate the absolute value of the right x for turn speed
-        double turnSpeed = Math.abs(Jc.rightStickX);
+    public void UpdateTurnSpeed(double input)
+    {
+        turnSpeed = input;
+    }
 
-        //Reset Gyro if needed
-        if(Jc.xButton)
+    //Reset Gyro if needed
+
+    public void gyroOffset()
+    {
+        Bot.OffsetGyro();
+    }
+
+    //switch between normal and slow modes
+    public void fullSpeed()
+    {
+        DriveSpeedMultiplier = BaseDriveSpeedMultiplier;
+        TurnSpeedMultiplier = BaseTurnSpeedMultiplier;
+    }
+    public void halfSpeed()
+    {
+        DriveSpeedMultiplier = BaseDriveSpeedMultiplier/2;
+        TurnSpeedMultiplier = BaseTurnSpeedMultiplier/2;
+    }
+
+    public void quarterSpeed()
+    {
+        DriveSpeedMultiplier = BaseDriveSpeedMultiplier/2;
+        TurnSpeedMultiplier = BaseTurnSpeedMultiplier/2;
+    }
+
+    public void brake(double power)
+    {
+        Bot.Brake(power);
+        DriveAngleReseted = false;
+    }
+
+    public void forthSpeed()
+    {
+        DriveSpeedMultiplier = BaseDriveSpeedMultiplier/8;
+        TurnSpeedMultiplier = BaseTurnSpeedMultiplier/8;
+    }
+
+    public void chooseDirection(double rightStickX, double leftStickBaring, double leftStickPower) //Move
+    {
+        if(!DriveAngleReseted)//reset the target drive angle
         {
-            Bot.OffsetGyro();
+            opmode.telemetry.addData("RESETING DRRIVE ANGLE: ", true);
+            DriveAngle = Bot.GetOriginalGyro();
+            DriveAngleReseted = true;
         }
 
-        //switch between normal and slow mode
-        if(Jc.yButton)
+        //if we need to turn while moving, choose direction and add/subtract that with the target angle
+        boolean turnRight = false;
+        if (rightStickX > JoystickThreshold)//turn right
         {
-            if(normalMode)
-            {
-                DriveSpeedMultiplier = BaseDriveSpeedMultiplier/2;
-                TurnSpeedMultiplier = BaseTurnSpeedMultiplier/2;
-                normalMode = false;
-            }
-
+            turnRight = true;
+            DriveAngle -= 6 * Math.abs(rightStickX);
         }
-        if(Jc.bButton)
+        else//turn left
         {
-            if(!normalMode)
-            {
-                DriveSpeedMultiplier = BaseDriveSpeedMultiplier;
-                TurnSpeedMultiplier = BaseTurnSpeedMultiplier;
-                normalMode = true;
-            }
+            turnRight = false;
+            DriveAngle += 6 * Math.abs(rightStickX);
         }
 
-        if(Jc.leftStickPower > JoystickThreshold) //Move
+        //Get the Drive angle over the 180 degree wall
+        if(DriveAngle > 180)//go to negative side
         {
-            //if we need to turn while moving, choose direction
-            boolean turnRight = false;
-            if (Jc.rightStickX > JoystickThreshold)
-            {
-                turnRight = true;
-            }
-            if (Jc.rightStickX <= JoystickThreshold)
-            {
-                turnRight = false;
-            }
-
-            //Make robot move at the angle of the left joystick at the determined speed while applying a turn to the value of the right joystick
-            Bot.MoveAtAngleTurning(Jc.leftStickBaring, DriveSpeedMultiplier * Jc.leftStickPower, turnRight, turnSpeed*TurnSpeedMultiplier);
-            telemetry.addData("Moving", true);
+            DriveAngle = -360 + DriveAngle;
         }
-
-        else if(Jc.rightStickX > JoystickThreshold) //Turn Right
+        if(DriveAngle < -180)//go to positive side
         {
-            Bot.RawTurn(true, turnSpeed*TurnSpeedMultiplier);
+            DriveAngle = 360 + DriveAngle;
         }
 
-        else if(Jc.rightStickX < -JoystickThreshold) //Turn Left
+        opmode.telemetry.addData("DRIVE ANGLE: ", DriveAngle);
+        opmode.telemetry.addData("RAW GYRO: ", Bot.GetOriginalGyro());
+
+        //Get an offset of the robot so that it can stay on track:
+        double [] vals = GetUsableRotsForOffset(DriveAngle, Bot.GetOriginalGyro());
+        opmode.telemetry.addData("OUT DRIVE ANGLE: ", vals[0]);
+        opmode.telemetry.addData("OUT RAW GYRO: ", vals[1]);
+        double offset = angleFollower.GetOffsetToAdd(vals[0], vals[1], 0.01, 0, 0);//gets an offset to keep the robot on track
+        opmode.telemetry.addData("OFFSET: ", offset);
+
+        if (!(offset > 0) && !(offset < 0))
         {
-            Bot.RawTurn(false, turnSpeed*TurnSpeedMultiplier);
+            offset = 0;
         }
 
-        /*if(Jc.leftStickPower > JoystickThreshold) //Move
-        {
-            Bot.MoveAtAngle(Jc.leftStickBaring, DriveSpeedMultiplier * Jc.leftStickPower);
-            telemetry.addData("Moving", true);
-        }
+        //Make robot move at the angle of the left joystick at the determined speed while applying a turn to the value of the right joystick
+        Bot.MoveAtAngleTurning(leftStickBaring, DriveSpeedMultiplier * leftStickPower, turnRight, 0 * TurnSpeedMultiplier, headlessMode, offset);
+    }
 
-        else if(Jc.rightStickX > JoystickThreshold) //Turn Right
-        {
-            Bot.RawTurn(true, turnSpeed*TurnSpeedMultiplier);
-        }
+    public void RawForwards(double speed)
+    {
+        Bot.RawForwards(speed);
+    }
 
-        else if(Jc.rightStickX < -JoystickThreshold) //Turn Left
-        {
-            Bot.RawTurn(false, turnSpeed*TurnSpeedMultiplier);
-        }*/
+    public void RawRight(double speed)
+    {
+        Bot.RawRight(speed);
+    }
 
-        else //STOP
-        {
-            Bot.StopMotors();
-        }
-        if(gamepad1.left_bumper){
-            gripper.GripperClose();
-        }
-        if(gamepad1.right_bumper){
-            gripper.GripperOpen();
-        }
-
-        if(gamepad1.dpad_up) {
-            arm.LiftUp();}
-        else if(gamepad1.dpad_down) {
-                arm.LiftDown();}
-        else {
-            arm.LiftStopVertical();
-        }
-
-        if(gamepad2.dpad_left) {
-            gripperPosition+=0.005;
-            gripper.GripperRotatePosition(gripperPosition);
-        }
-
-        if(gamepad2.dpad_right) {
-            gripperPosition -= 0.005;
-            gripper.GripperRotatePosition(gripperPosition);
-        }
-        if(gripperPosition>1){ gripperPosition = 1;}
-        if(gripperPosition<0){gripperPosition=0;}
-
-
-
-
-
-
-
-        if(gamepad1.dpad_left) {
-            arm.LiftLeft();}
-         else if (gamepad1.dpad_right) {
-            arm.LiftRight();}
-        else{
-            arm.LiftStopHorizontal();
+    public void turnRight() //Turn Right
+    {
+        Bot.RawTurn(true, turnSpeed*TurnSpeedMultiplier/2);
+        DriveAngleReseted = false;
     }
 
 
-
-
-
-
-
-        //update telemetry
-        telemetry.addData("Gyro Offset", Bot.GetGyroOffset());
-        telemetry.addData("Gyro Final Rot", Bot.GetFinalGyro());
-        telemetry.addData("Left Baring", Jc.leftStickBaring);
-        telemetry.addData("Left Power", Jc.leftStickPower);
-        telemetry.addData("Right X", Jc.rightStickX);
-        telemetry.addData("Right Y", Jc.rightStickY);
-        telemetry.addData("Controller ", gamepad1.left_stick_x);
-        telemetry.update();
-
+    public void turnLeft() //Turn Left
+    {
+        Bot.RawTurn(false, turnSpeed*TurnSpeedMultiplier/2);
+        DriveAngleReseted = false;
     }
+
+    public void stopWheels() //STOP
+    {
+        Bot.StopMotors();
+        Bot.SetBrakePos();
+        DriveAngleReseted = false;
+    }
+   // public void FoundationGrab(double desiredAngle){ Bot.FoundationGrab(desiredAngle); }
+    public int getfleftudc(){
+        int fleft = Bot.getfleft();
+        return fleft;
+    }
+    public int getfrightudc(){
+        int fright = Bot.getfright();
+        return fright;
+    }
+    public int getrleftudc(){
+        int rleft = Bot.getrleft();
+        return rleft;
+    }
+    public int getrrightudc(){
+        int rright = Bot.getrright();
+        return rright;
+    }
+
+    private double[] GetUsableRotsForOffset(double targetAbsRot, double currentAbsRot)//detects if the two numbers are
+    {
+        double newTargetRot = 0;
+        double newCurrentRot = 0;
+
+        double normalDistance = Math.abs(targetAbsRot - currentAbsRot);
+        double overTheLineDistance = Math.abs(-targetAbsRot - currentAbsRot);
+        boolean goNormal = normalDistance < 180;
+
+        if(!goNormal)//if need to go over the line
+        {
+            newTargetRot = (targetAbsRot - (180 * (Math.abs(targetAbsRot)/targetAbsRot)));//offset by 180 towards 0. The abs thing is to detect whether to add or subtract 170 -> -10
+            newCurrentRot = (currentAbsRot - (180 * (Math.abs(currentAbsRot)/currentAbsRot)));//offset by 180 towards 0. The abs thing is to detect whether to add or subtract -170 -> 10
+            opmode.telemetry.addData("OVER THE LINE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", true);
+        }
+        else //everything is normal
+        {
+            newTargetRot = targetAbsRot;
+            newCurrentRot = currentAbsRot;
+        }
+
+        return new double [] {newTargetRot, newCurrentRot};//return values
+    }
+
+
 }
